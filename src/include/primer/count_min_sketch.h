@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <utility>
@@ -102,7 +103,40 @@ class CountMinSketch {
     };
   }
 
-  /** @todo (student) can add their data structures that support count-min sketch operations */
+  /**
+   * @brief Rebuilds hash_functions_ so that every lambda captures *this* object.
+   *
+   * HashFunction() captures `this` in order to read width_, so the closures stored in
+   * hash_functions_ are bound to the instance that created them and can never be moved
+   * between instances. The seeds are deterministic, so regenerating them produces exactly
+   * the same functions while pointing at the correct object.
+   */
+  void ResetHashFunctions() {
+    hash_functions_.clear();
+    hash_functions_.reserve(depth_);
+    for (size_t i = 0; i < depth_; i++) {
+      hash_functions_.push_back(this->HashFunction(i));
+    }
+  }
+
+  /**
+   * @brief Resolves an item to its counter slot in the given row.
+   *
+   * @param row The row (hash function) to probe
+   * @param item The item to hash
+   * @return Index into matrix_ of the counter for (row, item)
+   */
+  auto SlotOf(size_t row, const KeyType &item) const -> size_t { return (row * width_) + hash_functions_[row](item); }
+
+  /**
+   * Counter matrix, stored row-major as a flat depth_ x width_ array.
+   *
+   * The counters are atomic so that Insert() can be lock-free: concurrent inserts only
+   * ever contend on individual cells via fetch_add, never on a shared latch. Relaxed
+   * ordering is sufficient because each counter is independent and no other memory is
+   * published alongside it.
+   */
+  std::vector<std::atomic<uint32_t>> matrix_;
 };
 
 }  // namespace bustub
